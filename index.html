@@ -1017,7 +1017,9 @@
         </div>
     </div>
 
-    <button class="dark-toggle" onclick="toggleDarkMode()" title="ダークモード切替">🌙</button>
+    <button class="dark-toggle" onclick="manualSaveContent()" title="内容保存"
+        style="width: auto; padding: 0 12px; border-radius: 8px; font-size: 0.85rem; font-weight: bold; display: flex; gap: 4px; background: #10b981;">💾
+        保存</button>
 
     <div class="menu-container">
         <button class="menu-btn" onclick="toggleMenu()">≡</button>
@@ -1672,7 +1674,7 @@
                     };
                 });
                 // 再構築
-                rehabBody.innerHTML = rehabs.map(r => `<div class="list-row rehab-grid"><label class="list-name"><input type="checkbox" class="r-chk" value="${r}" onchange="sortR(this)">${r}</label><select class="r-min" style="font-size:12px;padding:4px;"><option value="">-分</option>${Array.from({ length: 19 }, (_, i) => `<option value="${i * 5}">${i * 5}分</option>`).join('')}</select><select class="r-c">${Array.from({ length: 61 }, (_, i) => `<option value="${i}">${i}回</option>`).join('')}</select><select class="r-s">${Array.from({ length: 11 }, (_, i) => `<option value="${i}">${i}set</option>`).join('')}</select><div style="display:flex;gap:2px;align-items:center;"><input type="text" class="r-m" style="width:36px;padding:4px;font-size:12px;" placeholder="m"><span style="font-size:11px;">m</span></div><select class="r-nrs"><option value="">-NRS</option>${Array.from({ length: 11 }, (_, i) => `<option value="${i}">${i}</option>`).join('')}</select><select class="r-bg"><option value="">-Borg</option>${[6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20].map(v => `<option value="${v}">${v}</option>`).join('')}</select></div>`).join('');
+                rehabBody.innerHTML = rehabs.map(r => buildRehabRowHtml(r)).join('');
                 // 保存した入力状態を復元
                 rehabBody.querySelectorAll('.list-row').forEach(row => {
                     const chk = row.querySelector('.r-chk');
@@ -1710,10 +1712,7 @@
                 });
                 // 再構築
                 compBody.innerHTML = `<div class="compare-row" style="background:#fef3c7; font-weight:bold;"><div>項目</div><div>側</div><div>右</div><div>左</div><div>単位</div></div>` +
-                    compares.map(item => {
-                        const [n, u] = item.split(':');
-                        return `<div class="compare-row"><div><input type="checkbox" class="c-chk" value="${n}" data-unit="${u || ''}"> ${n}</div><select class="c-side" onchange="toggleCompSide(this)" style="font-size:11px;padding:4px;"><option value="lr">左右</option><option value="l">左のみ</option><option value="r">右のみ</option><option value="none">なし</option></select><input type="text" class="c-r in-r" style="grid-column:3"><input type="text" class="c-l in-l" style="grid-column:4"><input type="text" class="c-val" style="display:none;grid-column:3/5"><div style="grid-column:5">${u || ''}</div></div>`;
-                    }).join('');
+                    compares.map(item => buildCompRowHtml(item)).join('');
                 // 保存した入力状態を復元
                 compBody.querySelectorAll('.compare-row').forEach(row => {
                     const chk = row.querySelector('.c-chk');
@@ -1781,8 +1780,18 @@
             if (autoSaveTimer) clearInterval(autoSaveTimer);
             autoSaveTimer = setInterval(() => {
                 autoSaveDraft();
-            }, 60000); // 60秒ごと
+            }, 10000); // 10秒ごと
         }
+        function manualSaveContent() {
+            autoSaveDraft();
+            const ind = document.getElementById('autosave-indicator');
+            ind.textContent = '✅ 保存完了';
+            ind.style.color = '#10b981';
+            setTimeout(() => {
+                ind.style.color = '';
+            }, 2000);
+        }
+
         function autoSaveDraft() {
             const ind = document.getElementById('autosave-indicator');
             ind.textContent = '💾 保存中...';
@@ -1954,7 +1963,6 @@
                                 chk.checked = st.checked;
                                 if (st.checked) row.classList.add('checked-row');
                                 row.querySelector('.r-min').value = st.min || '';
-                                row.querySelector('.r-sec').value = st.sec || '';
                                 row.querySelector('.r-c').value = st.c || '0';
                                 row.querySelector('.r-s').value = st.s || '0';
                                 if (row.querySelector('.r-m')) row.querySelector('.r-m').value = st.m || '';
@@ -2583,10 +2591,10 @@
                 const nextSh = nextBlock.querySelector('.p-sh');
                 const nextSm = nextBlock.querySelector('.p-sm');
                 const nextEh = nextBlock.querySelector('.p-eh');
-                
+
                 if (nextSh) nextSh.value = eh;
                 if (nextSm) nextSm.value = em;
-                
+
                 // 次の患者の終了時間も1時間後に自動調整（23時を超えない範囲で）
                 if (nextEh) {
                     let newEh = parseInt(eh) + 1;
