@@ -1777,10 +1777,23 @@
         // === 自動保存 ===
         let autoSaveTimer = null;
         function startAutoSave() {
-            if (autoSaveTimer) clearInterval(autoSaveTimer);
-            autoSaveTimer = setInterval(() => {
-                autoSaveDraft();
-            }, 10000); // 10秒ごと
+            document.body.addEventListener('input', (e) => {
+                if (['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName)) {
+                    const ind = document.getElementById('autosave-indicator');
+                    ind.textContent = '💾 入力中...';
+                    ind.style.color = '#f59e0b';
+                    if (autoSaveTimer) clearTimeout(autoSaveTimer);
+                    autoSaveTimer = setTimeout(() => {
+                        autoSaveDraft();
+                    }, 1500);
+                }
+            });
+            document.body.addEventListener('change', (e) => {
+                if (['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName)) {
+                    if (autoSaveTimer) clearTimeout(autoSaveTimer);
+                    autoSaveDraft();
+                }
+            });
         }
         function manualSaveContent() {
             autoSaveDraft();
@@ -1795,6 +1808,7 @@
         function autoSaveDraft() {
             const ind = document.getElementById('autosave-indicator');
             ind.textContent = '💾 保存中...';
+            ind.style.color = '';
             ind.classList.add('saving');
             try {
                 const draft = [];
@@ -1872,7 +1886,7 @@
             if (!draft.blocks || !draft.blocks.length) return false;
 
             // 今日の日付と保存データの日付を比較
-            const today = new Date().toISOString().slice(0, 10);
+            const today = document.getElementById('dateInput').value || new Date().toLocaleDateString('sv-SE');
             const savedDate = draft.date || '';
             const isSameDay = (savedDate === today);
 
@@ -1915,7 +1929,6 @@
                 const nameSelect = b.querySelector('.p-name');
                 nameSelect.value = d.name;
                 loadPatientMemo(nameSelect);
-                updateInfoBadge(nameSelect);
 
                 b.querySelector('.p-sh').value = d.sh || '9';
                 b.querySelector('.p-sm').value = d.sm || '00';
@@ -1925,6 +1938,8 @@
                 b.querySelector('.p-sex').value = d.sex || '';
                 b.querySelector('.p-disease').value = d.disease || '';
                 b.querySelector('.p-dis-side').value = d.disSide || '';
+
+                updateInfoBadge(nameSelect);
                 // 高次脳・補助具の復元（患者属性として常に復元）
                 if (d.hbS) { b.querySelector('.p-hb').value = d.hbS; tgD(b.querySelector('.p-hb')); }
                 if (d.hbD) b.querySelector('.p-hb-d').value = d.hbD;
