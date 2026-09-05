@@ -1029,6 +1029,7 @@
             <button onclick="showInsHistory()">📝 学び・備考の履歴</button>
             <button onclick="exportData()">💾 データを保存</button>
             <button onclick="importData()">📂 データを復元</button>
+            <button onclick="restoreAutoSaveDraftManual()">📥 前回の保存データを復元</button>
             <button onclick="showSavedNotesModal()">📁 保存されたノート</button>
             <button onclick="showAssessmentSheet()">📋 アセスメントシート</button>
             <button onclick="showProgressRecord()">📊 経過記録（SOAP）</button>
@@ -1518,6 +1519,48 @@
         let vitalChartInstance = null; let scoreChartInstance = null;
         let diseaseListCounter = 0;
 
+        function checkAndMigrateOldVersions() {
+            try {
+                let currentHasData = false;
+                for (let i = 0; i < localStorage.length; i++) {
+                    const k = localStorage.key(i);
+                    if (k && k.startsWith(DB_PREFIX) && k !== DB_PREFIX + 'consent' && k !== DB_PREFIX + 'darkMode') {
+                        currentHasData = true;
+                        break;
+                    }
+                }
+                if (!currentHasData) {
+                    const oldPrefixes = new Set();
+                    for (let i = 0; i < localStorage.length; i++) {
+                        const k = localStorage.key(i);
+                        if (!k) continue;
+                        const m = k.match(/^(pt_final_v\d+_|pt_v\d+_)/);
+                        if (m && m[1] !== DB_PREFIX) {
+                            oldPrefixes.add(m[1]);
+                        }
+                    }
+                    if (oldPrefixes.size > 0) {
+                        const sorted = Array.from(oldPrefixes).sort().reverse();
+                        const targetOld = sorted[0];
+                        let count = 0;
+                        for (let i = 0; i < localStorage.length; i++) {
+                            const k = localStorage.key(i);
+                            if (k && k.startsWith(targetOld)) {
+                                const newKey = k.replace(targetOld, DB_PREFIX);
+                                if (!localStorage.getItem(newKey)) {
+                                    localStorage.setItem(newKey, localStorage.getItem(k));
+                                    count++;
+                                }
+                            }
+                        }
+                        if (count > 0) {
+                            console.log(`旧バージョン（${targetOld}）から ${count} 件のデータを引き継ぎました。`);
+                        }
+                    }
+                }
+            } catch (e) { console.error('Migration error:', e); }
+        }
+
         function toggleMenu() { const m = document.getElementById('nav-menu'); m.style.display = m.style.display === 'block' ? 'none' : 'block'; }
         function closeModal(id) { document.getElementById(id).style.display = 'none'; }
         function showCriteria() { document.getElementById('criteria-modal').style.display = 'block'; }
@@ -1796,7 +1839,7 @@
             });
         }
         function manualSaveContent() {
-            autoSaveDraft();
+            autoSaveDraft(true);
             const ind = document.getElementById('autosave-indicator');
             ind.textContent = '✅ 保存完了';
             ind.style.color = '#10b981';
@@ -1805,7 +1848,7 @@
             }, 2000);
         }
 
-        function autoSaveDraft() {
+        function autoSaveDraft(saveFullMem = false) {
             const ind = document.getElementById('autosave-indicator');
             ind.textContent = '💾 保存中...';
             ind.style.color = '';
@@ -1813,21 +1856,30 @@
             try {
                 const draft = [];
                 document.querySelectorAll('.patient-block').forEach(b => {
-                    const name = b.querySelector('.p-name').value;
+                    const name = b.querySelector('.p-name') ? b.querySelector('.p-name').value : '';
                     if (b.classList.contains('break-block')) {
-                        draft.push({ isBreak: true, name: name, sh: b.querySelector('.p-sh').value, sm: b.querySelector('.p-sm').value, eh: b.querySelector('.p-eh').value, em: b.querySelector('.p-em').value });
+                        draft.push({
+                            isBreak: true, name: name,
+                            sh: b.querySelector('.p-sh') ? b.querySelector('.p-sh').value : '9',
+                            sm: b.querySelector('.p-sm') ? b.querySelector('.p-sm').value : '00',
+                            eh: b.querySelector('.p-eh') ? b.querySelector('.p-eh').value : '10',
+                            em: b.querySelector('.p-em') ? b.querySelector('.p-em').value : '00'
+                        });
                         return;
                     }
                     // リハ内容の状態を保存
                     const rehabState = [];
                     b.querySelectorAll('.rehab-list-body .list-row').forEach(row => {
                         const chk = row.querySelector('.r-chk');
+                        if (!chk) return;
                         rehabState.push({
                             name: chk.value, checked: chk.checked,
-                            min: row.querySelector('.r-min').value,
-                            c: row.querySelector('.r-c').value, s: row.querySelector('.r-s').value,
+                            min: row.querySelector('.r-min') ? row.querySelector('.r-min').value : '',
+                            c: row.querySelector('.r-c') ? row.querySelector('.r-c').value : '0',
+                            s: row.querySelector('.r-s') ? row.querySelector('.r-s').value : '0',
                             m: row.querySelector('.r-m') ? row.querySelector('.r-m').value : '',
-                            nrs: row.querySelector('.r-nrs').value, bg: row.querySelector('.r-bg').value
+                            nrs: row.querySelector('.r-nrs') ? row.querySelector('.r-nrs').value : '',
+                            bg: row.querySelector('.r-bg') ? row.querySelector('.r-bg').value : ''
                         });
                     });
                     // 検査項目の状態を保存
@@ -1844,31 +1896,63 @@
                         });
                     });
                     const data = {
-                        name, sh: b.querySelector('.p-sh').value, sm: b.querySelector('.p-sm').value, eh: b.querySelector('.p-eh').value, em: b.querySelector('.p-em').value,
-                        age: b.querySelector('.p-age').value, sex: b.querySelector('.p-sex').value,
-                        disease: b.querySelector('.p-disease').value,
-                        disSide: b.querySelector('.p-dis-side').value,
-                        vPreS: b.querySelector('.v-pre-s').value, vPreD: b.querySelector('.v-pre-d').value,
-                        vPrePr: b.querySelector('.v-pre-pr').value, vPreBt: b.querySelector('.v-pre-bt').value,
-                        vPreSp: b.querySelector('.v-pre-sp').value,
-                        vPostS: b.querySelector('.v-post-s').value, vPostD: b.querySelector('.v-post-d').value,
-                        vPostPr: b.querySelector('.v-post-pr').value, vPostBt: b.querySelector('.v-post-bt').value,
-                        vPostSp: b.querySelector('.v-post-sp').value,
-                        soapS: b.querySelector('.p-soap-s').value,
-                        ins: b.querySelector('.p-ins').value,
-                        rem: b.querySelector('.p-rem').value,
-                        soapP: b.querySelector('.p-soap-p').value,
-                        hbS: b.querySelector('.p-hb').value, hbD: b.querySelector('.p-hb-d').value,
-                        dsS: b.querySelector('.p-ds').value, dsD: b.querySelector('.p-ds-d').value,
+                        name,
+                        sh: b.querySelector('.p-sh') ? b.querySelector('.p-sh').value : '9',
+                        sm: b.querySelector('.p-sm') ? b.querySelector('.p-sm').value : '00',
+                        eh: b.querySelector('.p-eh') ? b.querySelector('.p-eh').value : '10',
+                        em: b.querySelector('.p-em') ? b.querySelector('.p-em').value : '00',
+                        age: b.querySelector('.p-age') ? b.querySelector('.p-age').value : '10代',
+                        sex: b.querySelector('.p-sex') ? b.querySelector('.p-sex').value : '',
+                        disease: b.querySelector('.p-disease') ? b.querySelector('.p-disease').value : '',
+                        disSide: b.querySelector('.p-dis-side') ? b.querySelector('.p-dis-side').value : '',
+                        vPreS: b.querySelector('.v-pre-s') ? b.querySelector('.v-pre-s').value : '',
+                        vPreD: b.querySelector('.v-pre-d') ? b.querySelector('.v-pre-d').value : '',
+                        vPrePr: b.querySelector('.v-pre-pr') ? b.querySelector('.v-pre-pr').value : '',
+                        vPreBt: b.querySelector('.v-pre-bt') ? b.querySelector('.v-pre-bt').value : '',
+                        vPreSp: b.querySelector('.v-pre-sp') ? b.querySelector('.v-pre-sp').value : '',
+                        vPostS: b.querySelector('.v-post-s') ? b.querySelector('.v-post-s').value : '',
+                        vPostD: b.querySelector('.v-post-d') ? b.querySelector('.v-post-d').value : '',
+                        vPostPr: b.querySelector('.v-post-pr') ? b.querySelector('.v-post-pr').value : '',
+                        vPostBt: b.querySelector('.v-post-bt') ? b.querySelector('.v-post-bt').value : '',
+                        vPostSp: b.querySelector('.v-post-sp') ? b.querySelector('.v-post-sp').value : '',
+                        soapS: b.querySelector('.p-soap-s') ? b.querySelector('.p-soap-s').value : '',
+                        ins: b.querySelector('.p-ins') ? b.querySelector('.p-ins').value : '',
+                        rem: b.querySelector('.p-rem') ? b.querySelector('.p-rem').value : '',
+                        soapP: b.querySelector('.p-soap-p') ? b.querySelector('.p-soap-p').value : '',
+                        hbS: b.querySelector('.p-hb') ? b.querySelector('.p-hb').value : 'なし',
+                        hbD: b.querySelector('.p-hb-d') ? b.querySelector('.p-hb-d').value : '',
+                        dsS: b.querySelector('.p-ds') ? b.querySelector('.p-ds').value : 'なし',
+                        dsD: b.querySelector('.p-ds-d') ? b.querySelector('.p-ds-d').value : '',
                         caseChecked: b.querySelector('.case-chk') ? b.querySelector('.case-chk').checked : false,
                         collapsed: b.classList.contains('collapsed'),
                         rehabs: rehabState,
                         comps: compState
                     };
                     draft.push(data);
+
+                    // 手動保存時、または患者名がある場合は患者マスター記憶（full_mem_）も保存
+                    if (saveFullMem && name && name !== '休憩時間' && name !== 'free') {
+                        try {
+                            const curMemStr = localStorage.getItem(DB_PREFIX + 'full_mem_' + name);
+                            let curMem = curMemStr ? JSON.parse(curMemStr) : {};
+                            curMem.p = {
+                                age: data.age, sex: data.sex, dis: data.disease, disSide: data.disSide,
+                                hbS: data.hbS, hbD: data.hbD, dsS: data.dsS, dsD: data.dsD,
+                                sh: data.sh, sm: data.sm, eh: data.eh, em: data.em, ins: data.ins, rem: data.rem
+                            };
+                            curMem.vitals = {
+                                preS: data.vPreS, preD: data.vPreD, prePr: data.vPrePr, preBt: data.vPreBt, preSp: data.vPreSp,
+                                postS: data.vPostS, postD: data.vPostD, postPr: data.vPostPr, postBt: data.vPostBt, postSp: data.vPostSp
+                            };
+                            curMem.rehabs = rehabState.filter(r => r.checked).map(r => ({ n: r.name, min: r.min, c: r.c, s: r.s, m: r.m, nrs: r.nrs, bg: r.bg }));
+                            curMem.comps = compState.filter(c => c.checked).map(c => ({ n: c.name, sd: c.side, l: c.l, r: c.r, u: c.unit }));
+                            localStorage.setItem(DB_PREFIX + 'full_mem_' + name, JSON.stringify(curMem));
+                        } catch (err) { }
+                    }
                 });
+                const saveDate = document.getElementById('dateInput') ? document.getElementById('dateInput').value : '';
                 localStorage.setItem(DB_PREFIX + 'autosave_draft', JSON.stringify({
-                    date: document.getElementById('dateInput').value,
+                    date: saveDate,
                     blocks: draft,
                     savedAt: new Date().toLocaleTimeString('ja-JP')
                 }));
@@ -1879,22 +1963,30 @@
             }
             setTimeout(() => ind.classList.remove('saving'), 1000);
         }
-        function loadAutoSaveDraft() {
+        function loadAutoSaveDraft(isManual = false) {
             const raw = localStorage.getItem(DB_PREFIX + 'autosave_draft');
-            if (!raw) return false;
-            const draft = JSON.parse(raw);
-            if (!draft.blocks || !draft.blocks.length) return false;
+            if (!raw) {
+                if (isManual) alert('保存されている下書きデータがありません。');
+                return false;
+            }
+            let draft;
+            try { draft = JSON.parse(raw); } catch (e) { return false; }
+            if (!draft.blocks || !draft.blocks.length) {
+                if (isManual) alert('保存データが空です。');
+                return false;
+            }
 
             // 今日の日付と保存データの日付を比較
             const today = document.getElementById('dateInput').value || new Date().toLocaleDateString('sv-SE');
             const savedDate = draft.date || '';
             const isSameDay = (savedDate === today);
 
+            let restoreAllData = isSameDay;
             let confirmMsg;
             if (isSameDay) {
-                confirmMsg = `本日(${savedDate})の自動保存データがあります（${draft.savedAt}）。\nすべてのデータを復元しますか？`;
+                confirmMsg = `本日(${savedDate})の自動保存データがあります（${draft.savedAt || '不明'}）。\nすべてのデータを復元しますか？`;
             } else {
-                confirmMsg = `前回(${savedDate})の自動保存データがあります（${draft.savedAt}）。\n患者構成と基本情報のみ復元します（介入データはリセット）。\n復元しますか？`;
+                confirmMsg = `前回(${savedDate})の自動保存データがあります（${draft.savedAt || '不明'}）。\n患者構成と基本情報のみ復元します（介入データはリセット）。\n復元しますか？`;
             }
             if (!confirm(confirmMsg)) return false;
 
@@ -1906,111 +1998,151 @@
             draft.blocks.forEach(d => {
                 addPatientBlock();
                 const b = document.getElementById('patientList').lastElementChild;
+                if (!b) return;
+
                 if (d.isBreak) {
                     const sel = b.querySelector('.p-name');
-                    let opt = Array.from(sel.options).find(o => o.value === (d.name || '休憩時間'));
-                    if (!opt && d.name && d.name !== '休憩時間') {
-                        opt = document.createElement('option');
-                        opt.value = d.name;
-                        opt.textContent = '✏️ ' + d.name;
-                        opt.dataset.isBreak = 'true';
-                        sel.insertBefore(opt, sel.options[2]);
+                    if (sel) {
+                        let opt = Array.from(sel.options).find(o => o.value === (d.name || '休憩時間'));
+                        if (!opt && d.name && d.name !== '休憩時間') {
+                            opt = document.createElement('option');
+                            opt.value = d.name;
+                            opt.textContent = '✏️ ' + d.name;
+                            opt.dataset.isBreak = 'true';
+                            sel.insertBefore(opt, sel.options[2] || null);
+                        }
+                        sel.value = d.name || '休憩時間';
                     }
-                    sel.value = d.name || '休憩時間';
                     b.classList.add('break-block');
-                    b.querySelector('.p-sh').value = d.sh || '9';
-                    b.querySelector('.p-sm').value = d.sm || '00';
-                    b.querySelector('.p-eh').value = d.eh || '10';
-                    b.querySelector('.p-em').value = d.em || '00';
+                    if (b.querySelector('.p-sh')) b.querySelector('.p-sh').value = d.sh || '9';
+                    if (b.querySelector('.p-sm')) b.querySelector('.p-sm').value = d.sm || '00';
+                    if (b.querySelector('.p-eh')) b.querySelector('.p-eh').value = d.eh || '10';
+                    if (b.querySelector('.p-em')) b.querySelector('.p-em').value = d.em || '00';
                     return;
                 }
                 b.classList.remove('break-block');
+
                 // === 常に復元する項目（患者基本情報）===
                 const nameSelect = b.querySelector('.p-name');
-                nameSelect.value = d.name;
-                loadPatientMemo(nameSelect);
+                if (nameSelect) {
+                    let opt = Array.from(nameSelect.options).find(o => o.value === d.name);
+                    if (!opt && d.name) {
+                        opt = document.createElement('option');
+                        opt.value = d.name;
+                        opt.textContent = d.name;
+                        nameSelect.appendChild(opt);
+                    }
+                    nameSelect.value = d.name;
+                }
 
-                b.querySelector('.p-sh').value = d.sh || '9';
-                b.querySelector('.p-sm').value = d.sm || '00';
-                b.querySelector('.p-eh').value = d.eh || '10';
-                b.querySelector('.p-em').value = d.em || '00';
-                b.querySelector('.p-age').value = d.age || '10代';
-                b.querySelector('.p-sex').value = d.sex || '';
-                b.querySelector('.p-disease').value = d.disease || '';
-                b.querySelector('.p-dis-side').value = d.disSide || '';
+                // ブロック要素 b を渡してメモを安全に復元
+                loadPatientMemo(b);
 
-                updateInfoBadge(nameSelect);
-                // 高次脳・補助具の復元（患者属性として常に復元）
-                if (d.hbS) { b.querySelector('.p-hb').value = d.hbS; tgD(b.querySelector('.p-hb')); }
-                if (d.hbD) b.querySelector('.p-hb-d').value = d.hbD;
-                if (d.dsS) { b.querySelector('.p-ds').value = d.dsS; tgD(b.querySelector('.p-ds')); }
-                if (d.dsD) b.querySelector('.p-ds-d').value = d.dsD;
-                // 症例チェックの復元（患者設定として常に復元）
+                if (b.querySelector('.p-sh')) b.querySelector('.p-sh').value = d.sh || '9';
+                if (b.querySelector('.p-sm')) b.querySelector('.p-sm').value = d.sm || '00';
+                if (b.querySelector('.p-eh')) b.querySelector('.p-eh').value = d.eh || '10';
+                if (b.querySelector('.p-em')) b.querySelector('.p-em').value = d.em || '00';
+                if (b.querySelector('.p-age')) b.querySelector('.p-age').value = d.age || '10代';
+                if (b.querySelector('.p-sex')) b.querySelector('.p-sex').value = d.sex || '';
+                if (b.querySelector('.p-disease')) b.querySelector('.p-disease').value = d.disease || '';
+                if (b.querySelector('.p-dis-side')) b.querySelector('.p-dis-side').value = d.disSide || '';
+
+                if (nameSelect) updateInfoBadge(nameSelect);
+
+                // 高次脳・補助具の復元
+                if (d.hbS && b.querySelector('.p-hb')) { b.querySelector('.p-hb').value = d.hbS; tgD(b.querySelector('.p-hb')); }
+                if (d.hbD && b.querySelector('.p-hb-d')) b.querySelector('.p-hb-d').value = d.hbD;
+                if (d.dsS && b.querySelector('.p-ds')) { b.querySelector('.p-ds').value = d.dsS; tgD(b.querySelector('.p-ds')); }
+                if (d.dsD && b.querySelector('.p-ds-d')) b.querySelector('.p-ds-d').value = d.dsD;
+
+                // 症例チェックの復元
                 if (d.caseChecked) {
                     const caseChk = b.querySelector('.case-chk');
                     if (caseChk) { caseChk.checked = true; toggleCasePatient(caseChk); }
                 }
-                // 備考の復元（常に復元）
-                b.querySelector('.p-rem').value = d.rem || '';
 
-                // === 同日のみ復元する項目（介入データ）===
-                if (isSameDay) {
-                    if (d.vPreS) b.querySelector('.v-pre-s').value = d.vPreS;
-                    if (d.vPreD) b.querySelector('.v-pre-d').value = d.vPreD;
-                    if (d.vPrePr) b.querySelector('.v-pre-pr').value = d.vPrePr;
-                    if (d.vPreBt) b.querySelector('.v-pre-bt').value = d.vPreBt;
-                    if (d.vPreSp) b.querySelector('.v-pre-sp').value = d.vPreSp;
-                    if (d.vPostS) b.querySelector('.v-post-s').value = d.vPostS;
-                    if (d.vPostD) b.querySelector('.v-post-d').value = d.vPostD;
-                    if (d.vPostPr) b.querySelector('.v-post-pr').value = d.vPostPr;
-                    if (d.vPostBt) b.querySelector('.v-post-bt').value = d.vPostBt;
-                    if (d.vPostSp) b.querySelector('.v-post-sp').value = d.vPostSp;
-                    if (d.soapS) b.querySelector('.p-soap-s').value = d.soapS;
-                    if (d.ins) b.querySelector('.p-ins').value = d.ins;
-                    if (d.soapP) b.querySelector('.p-soap-p').value = d.soapP;
+                // 備考の復元
+                if (b.querySelector('.p-rem')) b.querySelector('.p-rem').value = d.rem || '';
+
+                // === 介入データ（バイタル・SOAP・リハ・検査）の復元 ===
+                if (restoreAllData) {
+                    if (d.vPreS && b.querySelector('.v-pre-s')) b.querySelector('.v-pre-s').value = d.vPreS;
+                    if (d.vPreD && b.querySelector('.v-pre-d')) b.querySelector('.v-pre-d').value = d.vPreD;
+                    if (d.vPrePr && b.querySelector('.v-pre-pr')) b.querySelector('.v-pre-pr').value = d.vPrePr;
+                    if (d.vPreBt && b.querySelector('.v-pre-bt')) b.querySelector('.v-pre-bt').value = d.vPreBt;
+                    if (d.vPreSp && b.querySelector('.v-pre-sp')) b.querySelector('.v-pre-sp').value = d.vPreSp;
+                    if (d.vPostS && b.querySelector('.v-post-s')) b.querySelector('.v-post-s').value = d.vPostS;
+                    if (d.vPostD && b.querySelector('.v-post-d')) b.querySelector('.v-post-d').value = d.vPostD;
+                    if (d.vPostPr && b.querySelector('.v-post-pr')) b.querySelector('.v-post-pr').value = d.vPostPr;
+                    if (d.vPostBt && b.querySelector('.v-post-bt')) b.querySelector('.v-post-bt').value = d.vPostBt;
+                    if (d.vPostSp && b.querySelector('.v-post-sp')) b.querySelector('.v-post-sp').value = d.vPostSp;
+                    if (d.soapS && b.querySelector('.p-soap-s')) b.querySelector('.p-soap-s').value = d.soapS;
+                    if (d.ins && b.querySelector('.p-ins')) b.querySelector('.p-ins').value = d.ins;
+                    if (d.soapP && b.querySelector('.p-soap-p')) b.querySelector('.p-soap-p').value = d.soapP;
+
                     // リハ内容の復元
                     if (d.rehabs && d.rehabs.length) {
                         const rehabBody = b.querySelector('.rehab-list-body');
-                        rehabBody.querySelectorAll('.list-row').forEach(row => {
-                            const chk = row.querySelector('.r-chk');
-                            const st = d.rehabs.find(r => r.name === chk.value);
-                            if (st) {
-                                chk.checked = st.checked;
-                                if (st.checked) row.classList.add('checked-row');
-                                row.querySelector('.r-min').value = st.min || '';
-                                row.querySelector('.r-c').value = st.c || '0';
-                                row.querySelector('.r-s').value = st.s || '0';
-                                if (row.querySelector('.r-m')) row.querySelector('.r-m').value = st.m || '';
-                                row.querySelector('.r-nrs').value = st.nrs || '';
-                                row.querySelector('.r-bg').value = st.bg || '';
-                            }
-                        });
-                        // チェック済みを上に並べ替え
-                        const rRows = Array.from(rehabBody.children).filter(el => el.classList.contains('list-row'));
-                        rRows.sort((x, y) => (x.querySelector('input').checked === y.querySelector('input').checked) ? 0 : x.querySelector('input').checked ? -1 : 1);
-                        rRows.forEach(r => rehabBody.appendChild(r));
+                        if (rehabBody) {
+                            d.rehabs.forEach(st => {
+                                let row = Array.from(rehabBody.querySelectorAll('.list-row')).find(r => {
+                                    const chk = r.querySelector('.r-chk');
+                                    return chk && chk.value === st.name;
+                                });
+                                if (!row && st.checked) {
+                                    rehabBody.insertAdjacentHTML('beforeend', buildRehabRowHtml(st.name));
+                                    row = rehabBody.lastElementChild;
+                                }
+                                if (row) {
+                                    const chk = row.querySelector('.r-chk');
+                                    if (chk) {
+                                        chk.checked = !!st.checked;
+                                        if (st.checked) row.classList.add('checked-row');
+                                    }
+                                    if (row.querySelector('.r-min')) row.querySelector('.r-min').value = st.min || '';
+                                    if (row.querySelector('.r-c')) row.querySelector('.r-c').value = st.c || '0';
+                                    if (row.querySelector('.r-s')) row.querySelector('.r-s').value = st.s || '0';
+                                    if (row.querySelector('.r-m')) row.querySelector('.r-m').value = st.m || '';
+                                    if (row.querySelector('.r-nrs')) row.querySelector('.r-nrs').value = st.nrs || '';
+                                    if (row.querySelector('.r-bg')) row.querySelector('.r-bg').value = st.bg || '';
+                                }
+                            });
+                            // チェック済みを上に並べ替え
+                            const rRows = Array.from(rehabBody.children).filter(el => el.classList.contains('list-row'));
+                            rRows.sort((x, y) => (x.querySelector('input').checked === y.querySelector('input').checked) ? 0 : x.querySelector('input').checked ? -1 : 1);
+                            rRows.forEach(r => rehabBody.appendChild(r));
+                        }
                     }
+
                     // 検査項目の復元
                     if (d.comps && d.comps.length) {
-                        b.querySelectorAll('.compare-body .compare-row').forEach(row => {
-                            const chk = row.querySelector('.c-chk');
-                            if (!chk) return;
-                            const st = d.comps.find(c => c.name === chk.value);
-                            if (st) {
-                                chk.checked = st.checked;
-                                const sideEl = row.querySelector('.c-side');
-                                if (sideEl) { sideEl.value = st.side || 'lr'; toggleCompSide(sideEl); }
-                                if (st.side === 'none') {
-                                    if (row.querySelector('.c-val')) row.querySelector('.c-val').value = st.val || st.l || '';
-                                } else {
-                                    if (row.querySelector('.c-r')) row.querySelector('.c-r').value = st.r || '';
-                                    if (row.querySelector('.c-l')) row.querySelector('.c-l').value = st.l || '';
+                        const compBody = b.querySelector('.compare-body');
+                        if (compBody) {
+                            d.comps.forEach(st => {
+                                let row = Array.from(compBody.querySelectorAll('.compare-row')).find(r => {
+                                    const chk = r.querySelector('.c-chk');
+                                    return chk && chk.value === st.name;
+                                });
+                                if (!row && st.checked) {
+                                    compBody.insertAdjacentHTML('beforeend', buildCompRowHtml(st.name));
+                                    row = compBody.lastElementChild;
                                 }
-                            }
-                        });
+                                if (row) {
+                                    const chk = row.querySelector('.c-chk');
+                                    if (chk) chk.checked = !!st.checked;
+                                    const sideEl = row.querySelector('.c-side');
+                                    if (sideEl) { sideEl.value = st.side || 'lr'; toggleCompSide(sideEl); }
+                                    if (st.side === 'none') {
+                                        if (row.querySelector('.c-val')) row.querySelector('.c-val').value = st.val || st.l || '';
+                                    } else {
+                                        if (row.querySelector('.c-r')) row.querySelector('.c-r').value = st.r || '';
+                                        if (row.querySelector('.c-l')) row.querySelector('.c-l').value = st.l || '';
+                                    }
+                                }
+                            });
+                        }
                     }
                 }
-                // 日付が異なる場合、介入データは復元しない（初期状態のまま）
 
                 const cb = b.querySelector('.collapse-btn');
                 if (d.collapsed) {
@@ -2021,9 +2153,18 @@
                     if (cb) cb.textContent = '▲ たたむ';
                 }
                 loadPatientMemo(b);
-                updateInfoBadge(b.querySelector('.p-name'));
+                if (nameSelect) updateInfoBadge(nameSelect);
             });
             return true;
+        }
+
+        function restoreAutoSaveDraftManual() {
+            const menu = document.getElementById('nav-menu');
+            if (menu) menu.style.display = 'none';
+            const ok = loadAutoSaveDraft(true);
+            if (ok) {
+                alert('前回の保存データを復元しました。');
+            }
         }
 
         // === リハ項目行HTML生成 ===
@@ -2105,9 +2246,13 @@
             });
         }
 
-        function loadPatientMemo(b) {
-            const name = b.querySelector('.p-name').value;
-            if (!name || b.classList.contains('break-block')) return;
+        function loadPatientMemo(target) {
+            if (!target) return;
+            const b = (target.classList && target.classList.contains('patient-block')) ? target : (target.closest ? target.closest('.patient-block') : null);
+            if (!b || b.classList.contains('break-block')) return;
+            const nameEl = b.querySelector('.p-name');
+            const name = nameEl ? nameEl.value : '';
+            if (!name || name === '休憩時間' || name === 'free') return;
             const memo = localStorage.getItem(DB_PREFIX + 'pmemo_' + name) || '';
             const memoInput = b.querySelector('.p-memo');
             if (memoInput) memoInput.value = memo;
@@ -3063,23 +3208,51 @@
 
         function showDataStatus() {
             const bar = document.getElementById('data-status-bar');
+            if (!bar) return;
             let patientCount = 0;
+            let hasDraft = false;
+            let draftDate = '';
             for (let i = 0; i < localStorage.length; i++) {
-                if (localStorage.key(i).startsWith(DB_PREFIX + 'full_mem_')) patientCount++;
+                const k = localStorage.key(i);
+                if (k && k.startsWith(DB_PREFIX + 'full_mem_')) patientCount++;
             }
-            if (patientCount > 0) {
+            try {
+                const draftRaw = localStorage.getItem(DB_PREFIX + 'autosave_draft');
+                if (draftRaw) {
+                    const draft = JSON.parse(draftRaw);
+                    if (draft && draft.blocks && draft.blocks.length) {
+                        hasDraft = true;
+                        draftDate = draft.date || '';
+                    }
+                }
+            } catch (e) { }
+
+            if (patientCount > 0 || hasDraft) {
                 bar.style.background = '#d1fae5';
                 bar.style.color = '#065f46';
                 bar.style.borderTop = '2px solid #10b981';
-                bar.innerHTML = `✅ ${patientCount}名分のデータが保存されています`;
+                let msg = '✅ ';
+                if (patientCount > 0) msg += `${patientCount}名分の患者データ`;
+                if (patientCount > 0 && hasDraft) msg += ' および ';
+                if (hasDraft) msg += `下書きデータ（${draftDate || '直近'}）`;
+                msg += ' が保存されています';
+                bar.innerHTML = msg;
+                bar.style.display = 'block';
+                setTimeout(() => {
+                    bar.style.opacity = '0';
+                    setTimeout(() => { bar.style.display = 'none'; bar.style.opacity = '1'; }, 500);
+                }, 4000);
             } else {
                 bar.style.background = '#fef3c7';
                 bar.style.color = '#92400e';
                 bar.style.borderTop = '2px solid #f59e0b';
-                bar.innerHTML = '⚠️ 保存データがありません。バックアップがあれば <button onclick="importData()" style="background:#f59e0b;color:white;border:none;padding:3px 10px;border-radius:4px;font-size:0.8rem;cursor:pointer;">📂 データを復元</button> してください';
+                bar.innerHTML = 'ℹ️ 保存データはまだありません。入力内容は自動保存されます。<button onclick="importData()" style="margin-left:8px;background:#f59e0b;color:white;border:none;padding:3px 10px;border-radius:4px;font-size:0.8rem;cursor:pointer;">📂 データを復元</button>';
+                bar.style.display = 'block';
+                setTimeout(() => {
+                    bar.style.opacity = '0';
+                    setTimeout(() => { bar.style.display = 'none'; bar.style.opacity = '1'; }, 500);
+                }, 5000);
             }
-            bar.style.display = 'block';
-            setTimeout(() => { if (patientCount > 0) { bar.style.opacity = '0'; setTimeout(() => { bar.style.display = 'none'; bar.style.opacity = '1'; }, 500); } }, 4000);
         }
 
         // === セクション別リセット関数 ===
@@ -3187,6 +3360,7 @@
         }
 
         window.onload = () => {
+            checkAndMigrateOldVersions();
             checkAutoDelete();
             loadConfig();
             document.getElementById('dateInput').valueAsDate = new Date();
