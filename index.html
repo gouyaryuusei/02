@@ -527,6 +527,20 @@
             background: #fff5f5;
         }
 
+        /* SOAP対応バッジ（O・A用 ― 症例ON時にラベル横に表示） */
+        .soap-badge {
+            display: none;
+            font-size: 0.7rem;
+            font-weight: bold;
+            color: #dc2626;
+            margin-left: 6px;
+            vertical-align: middle;
+        }
+
+        .soap-badge.visible {
+            display: inline;
+        }
+
         .note-copy-btn {
             margin-top: 10px;
             padding: 10px 20px;
@@ -1855,6 +1869,7 @@
             ind.classList.add('saving');
             try {
                 const draft = [];
+                const saveDate = document.getElementById('dateInput') ? document.getElementById('dateInput').value : '';
                 document.querySelectorAll('.patient-block').forEach(b => {
                     const name = b.querySelector('.p-name') ? b.querySelector('.p-name').value : '';
                     if (b.classList.contains('break-block')) {
@@ -1947,10 +1962,19 @@
                             curMem.rehabs = rehabState.filter(r => r.checked).map(r => ({ n: r.name, min: r.min, c: r.c, s: r.s, m: r.m, nrs: r.nrs, bg: r.bg }));
                             curMem.comps = compState.filter(c => c.checked).map(c => ({ n: c.name, sd: c.side, l: c.l, r: c.r, u: c.unit }));
                             localStorage.setItem(DB_PREFIX + 'full_mem_' + name, JSON.stringify(curMem));
+
+                            // 学び・備考の履歴も更新（同日は最後に記録された最新のもののみ保存）
+                            const insTrim = (data.ins || '').trim();
+                            const remTrim = (data.rem || '').trim();
+                            if ((insTrim || remTrim) && saveDate) {
+                                let insHist = JSON.parse(localStorage.getItem(DB_PREFIX + 'ins_hist_' + name)) || [];
+                                insHist = insHist.filter(h => h.date !== saveDate);
+                                insHist.push({ date: saveDate, ins: insTrim, rem: remTrim });
+                                localStorage.setItem(DB_PREFIX + 'ins_hist_' + name, JSON.stringify(insHist.slice(-50)));
+                            }
                         } catch (err) { }
                     }
                 });
-                const saveDate = document.getElementById('dateInput') ? document.getElementById('dateInput').value : '';
                 localStorage.setItem(DB_PREFIX + 'autosave_draft', JSON.stringify({
                     date: saveDate,
                     blocks: draft,
@@ -2708,7 +2732,8 @@
             </div><button class="add-item-btn" onclick="addCompItem(this)">＋ 検査項目を追加</button></div>
 
             <div class="soap-field soap-s-field"><label>🗣️ S（主観的情報）</label><textarea class="p-soap-s" rows="3" placeholder="患者の訴え、希望、感想など"></textarea></div>
-            <div class="row"><div class="col"><div class="section-header"><label>💡 学び・アセスメント（⚠️重要）</label><button class="section-reset-btn" onclick="resetTextarea(this, '.p-ins')">リセット</button></div><textarea class="p-ins" rows="4"></textarea></div></div>
+            <div class="soap-field soap-o-field"><label>📝 O（客観的情報）― 上記のバイタル・リハ内容・評価が自動で反映されます</label></div>
+            <div class="row soap-a-section"><div class="col"><div class="section-header"><label>💡 学び・アセスメント（⚠️重要）<span class="soap-badge soap-a-badge">← SOAP「A」に反映</span></label><button class="section-reset-btn" onclick="resetTextarea(this, '.p-ins')">リセット</button></div><textarea class="p-ins" rows="4"></textarea></div></div>
             <div class="soap-field soap-p-field"><label>🏁 P（計画）</label><textarea class="p-soap-p" rows="3" placeholder="今後の治療計画、目標など"></textarea></div>
             <div class="row">
                 <div class="col"><div class="section-header"><label>🧠 高次脳</label><button class="section-reset-btn" onclick="resetHbDs(this, '.p-hb', '.p-hb-d')">リセット</button></div><select class="p-hb" onchange="tgD(this)"><option value="なし">なし</option><option value="あり">あり</option></select><input type="text" class="p-hb-d detail-input"></div>
@@ -2852,10 +2877,11 @@
                 const hbS = b.querySelector('.p-hb').value, hbD = b.querySelector('.p-hb-d').value;
                 const dsS = b.querySelector('.p-ds').value, dsD = b.querySelector('.p-ds-d').value;
 
-                // 学び・備考を日付付き履歴として保存
+                // 学び・備考を日付付き履歴として保存（同日は最後に記録された最新のもののみ保存）
                 const rem = b.querySelector('.p-rem').value.trim();
                 if (ins || rem) {
                     let insHist = JSON.parse(localStorage.getItem(DB_PREFIX + 'ins_hist_' + name)) || [];
+                    insHist = insHist.filter(h => h.date !== date);
                     insHist.push({ date, ins: ins, rem: rem });
                     localStorage.setItem(DB_PREFIX + 'ins_hist_' + name, JSON.stringify(insHist.slice(-50)));
                 }
@@ -2976,6 +3002,7 @@
             currentChartName = name;
             document.getElementById('chart-title').innerText = `${name} 推移`;
             currentVitalHistory = JSON.parse(localStorage.getItem(DB_PREFIX + 'hist_' + name)) || [];
+            currentVitalHistory.sort((a, b) => (a.date || '').replace(/\//g, '-').localeCompare((b.date || '').replace(/\//g, '-')));
             if (!currentVitalHistory.length) return alert("データ不足");
             renderVitalChart();
             switchChartTab('vital');
@@ -2985,22 +3012,27 @@
         function renderVitalChart() {
             const history = currentVitalHistory;
             if (!history.length) return;
+            const parseVal = v => {
+                if (v === undefined || v === null || v === '') return null;
+                const n = parseFloat(v);
+                return isNaN(n) ? null : n;
+            };
             const allDatasets = [
-                { key: 'vPreS', label: '前)血圧(上)', data: history.map(h => parseInt(h.vPreS) || null), borderColor: '#ef4444', pointRadius: 4, borderWidth: 2 },
-                { key: 'vPreD', label: '前)血圧(下)', data: history.map(h => parseInt(h.vPreD) || null), borderColor: '#f97316', pointRadius: 3, borderWidth: 1.5, borderDash: [5, 3] },
-                { key: 'vPrePr', label: '前)脈拍', data: history.map(h => parseInt(h.vPrePr) || null), borderColor: '#3b82f6', pointRadius: 4, borderWidth: 2 },
-                { key: 'vPreSp', label: '前)SpO2', data: history.map(h => parseInt(h.vPreSp) || null), borderColor: '#10b981', pointRadius: 3, borderWidth: 1.5 },
-                { key: 'vPostS', label: '後)血圧(上)', data: history.map(h => parseInt(h.vPostS) || null), borderColor: '#dc2626', pointRadius: 4, borderWidth: 2, borderDash: [8, 4] },
-                { key: 'vPostD', label: '後)血圧(下)', data: history.map(h => parseInt(h.vPostD) || null), borderColor: '#ea580c', pointRadius: 3, borderWidth: 1.5, borderDash: [3, 3] },
-                { key: 'vPostPr', label: '後)脈拍', data: history.map(h => parseInt(h.vPostPr) || null), borderColor: '#2563eb', pointRadius: 4, borderWidth: 2, borderDash: [8, 4] },
-                { key: 'vPostSp', label: '後)SpO2', data: history.map(h => parseInt(h.vPostSp) || null), borderColor: '#059669', pointRadius: 3, borderWidth: 1.5, borderDash: [8, 4] }
+                { key: 'vPreS', label: '前)血圧(上)', data: history.map(h => parseVal(h.vPreS)), borderColor: '#ef4444', pointRadius: 4, borderWidth: 2, spanGaps: true },
+                { key: 'vPreD', label: '前)血圧(下)', data: history.map(h => parseVal(h.vPreD)), borderColor: '#f97316', pointRadius: 3, borderWidth: 1.5, borderDash: [5, 3], spanGaps: true },
+                { key: 'vPrePr', label: '前)脈拍', data: history.map(h => parseVal(h.vPrePr)), borderColor: '#3b82f6', pointRadius: 4, borderWidth: 2, spanGaps: true },
+                { key: 'vPreSp', label: '前)SpO2', data: history.map(h => parseVal(h.vPreSp)), borderColor: '#10b981', pointRadius: 3, borderWidth: 1.5, spanGaps: true },
+                { key: 'vPostS', label: '後)血圧(上)', data: history.map(h => parseVal(h.vPostS)), borderColor: '#dc2626', pointRadius: 4, borderWidth: 2, borderDash: [8, 4], spanGaps: true },
+                { key: 'vPostD', label: '後)血圧(下)', data: history.map(h => parseVal(h.vPostD)), borderColor: '#ea580c', pointRadius: 3, borderWidth: 1.5, borderDash: [3, 3], spanGaps: true },
+                { key: 'vPostPr', label: '後)脈拍', data: history.map(h => parseVal(h.vPostPr)), borderColor: '#2563eb', pointRadius: 4, borderWidth: 2, borderDash: [8, 4], spanGaps: true },
+                { key: 'vPostSp', label: '後)SpO2', data: history.map(h => parseVal(h.vPostSp)), borderColor: '#059669', pointRadius: 3, borderWidth: 1.5, borderDash: [8, 4], spanGaps: true }
             ];
             const checked = new Set(Array.from(document.querySelectorAll('.vital-chk:checked')).map(c => c.value));
             const datasets = allDatasets.filter(d => checked.has(d.key)).map(({ key, ...rest }) => rest);
             if (vitalChartInstance) vitalChartInstance.destroy();
             vitalChartInstance = new Chart(document.getElementById('vitalChart'), {
                 type: 'line', data: { labels: history.map(h => h.date), datasets },
-                options: { responsive: true, plugins: { legend: { position: 'bottom', labels: { font: { size: 10 }, usePointStyle: true } } } }
+                options: { responsive: true, spanGaps: true, plugins: { legend: { position: 'bottom', labels: { font: { size: 10 }, usePointStyle: true } } } }
             });
         }
 
@@ -3009,6 +3041,7 @@
             if (name) currentScoreName = name;
             else name = currentScoreName;
             const history = JSON.parse(localStorage.getItem(DB_PREFIX + 'hist_' + name)) || [];
+            history.sort((a, b) => (a.date || '').replace(/\//g, '-').localeCompare((b.date || '').replace(/\//g, '-')));
             const area = document.getElementById('score-chart-area');
             if (!history.length) return;
 
@@ -3107,7 +3140,7 @@
                 type: 'line',
                 data: { labels: history.map(h => h.date), datasets },
                 options: {
-                    responsive: true, interaction: { mode: 'index', intersect: false }, scales,
+                    responsive: true, spanGaps: true, interaction: { mode: 'index', intersect: false }, scales,
                     plugins: {
                         legend: { position: 'bottom', labels: { font: { size: 10 }, usePointStyle: true } },
                         tooltip: { callbacks: { label: function (ctx) { return ctx.dataset.label + ': ' + (ctx.parsed.y !== null ? ctx.parsed.y : '-'); } } }
@@ -3145,10 +3178,23 @@
             if (!name) { cont.innerHTML = '<p style="color:#94a3b8;text-align:center;">患者を選択してください</p>'; return; }
             const hist = JSON.parse(localStorage.getItem(DB_PREFIX + 'ins_hist_' + name)) || [];
             if (!hist.length) { cont.innerHTML = '<p style="color:#94a3b8;text-align:center;">履歴がありません</p>'; return; }
-            // 新しい順に表示
-            const reversed = [...hist].reverse();
+            // 新しい順に表示（同一日付がある場合は最後に記録された最新のものを優先）
+            const seenDates = new Set();
+            const uniqueReversed = [];
+            for (let i = hist.length - 1; i >= 0; i--) {
+                const entry = hist[i];
+                const d = entry.date || '';
+                if (d) {
+                    if (!seenDates.has(d)) {
+                        seenDates.add(d);
+                        uniqueReversed.push(entry);
+                    }
+                } else {
+                    uniqueReversed.push(entry);
+                }
+            }
             let html = '';
-            reversed.forEach((entry, i) => {
+            uniqueReversed.forEach((entry, i) => {
                 html += `<div style="border:1px solid #e2e8f0; border-radius:8px; padding:10px; margin-bottom:8px; background:${i % 2 === 0 ? '#f8fafc' : '#fff'};">`;
                 html += `<div style="font-weight:bold; color:var(--primary); font-size:0.85rem; margin-bottom:5px;">📅 ${escHtml(entry.date || '日付なし')}</div>`;
                 if (entry.ins) html += `<div style="margin-bottom:4px;"><span style="font-weight:bold;color:#475569;font-size:0.75rem;">💡 学び・アセスメント</span><div style="white-space:pre-wrap;font-size:0.8rem;padding:5px;background:#f0fdf4;border-radius:4px;border:1px solid #bbf7d0;">${escHtml(entry.ins)}</div></div>`;
@@ -3605,11 +3651,17 @@
             const block = chk.closest('.patient-block');
             const sField = block.querySelector('.soap-s-field');
             const pField = block.querySelector('.soap-p-field');
+            const oField = block.querySelector('.soap-o-field');
+            const aBadges = block.querySelectorAll('.soap-a-badge');
             if (chk.checked) {
                 if (sField) sField.classList.add('visible');
+                if (oField) oField.classList.add('visible');
+                aBadges.forEach(b => b.classList.add('visible'));
                 if (pField) pField.classList.add('visible');
             } else {
                 if (sField) sField.classList.remove('visible');
+                if (oField) oField.classList.remove('visible');
+                aBadges.forEach(b => b.classList.remove('visible'));
                 if (pField) pField.classList.remove('visible');
             }
         }
